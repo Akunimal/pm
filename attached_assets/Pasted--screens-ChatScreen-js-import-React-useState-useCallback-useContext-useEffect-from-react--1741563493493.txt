@@ -1,0 +1,209 @@
+// screens/ChatScreen.js
+import React, { useState, useCallback, useContext, useEffect } from 'react';
+import { View, ActivityIndicator, Alert, Platform, KeyboardAvoidingView, Text, Image, TouchableOpacity } from 'react-native';
+import { GiftedChat, InputToolbar, Actions } from 'react-native-gifted-chat';
+import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
+import { AppContext } from '../../context/AppContext';
+import { sendMessageToOpenAI, sendImageToOpenAI } from '../../api/openai';
+
+const ChatScreen = () => {
+  const { initialMessage, language } = useContext(AppContext);
+  const [messages, setMessages] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [imagePreview, setImagePreview] = useState(null);
+
+  const translations = {
+    es: {
+      tip: 'Asegúrate de que la imagen esté enfocada y se vean claramente los componentes del motor o vehículo.',
+      cancel: 'Cancelar',
+      send: 'Enviar Imagen',
+      upload: 'Subir Foto',
+      capture: 'Tomar Foto',
+    },
+    en: {
+      tip: 'Make sure the image is focused and the engine or vehicle components are clearly visible.',
+      cancel: 'Cancel',
+      send: 'Send Image',
+      upload: 'Upload Photo',
+      capture: 'Take Photo',
+    },
+    pt: {
+      tip: 'Certifique-se de que a imagem esteja focada e que os componentes do motor ou veículo estejam claramente visíveis.',
+      cancel: 'Cancelar',
+      send: 'Enviar Imagem',
+      upload: 'Enviar Foto',
+      capture: 'Tirar Foto',
+    },
+    fr: {
+      tip: 'Assurez-vous que l’image est nette et que les composants du moteur ou du véhicule sont bien visibles.',
+      cancel: 'Annuler',
+      send: 'Envoyer l’image',
+      upload: 'Télécharger Photo',
+      capture: 'Prendre une Photo',
+    },
+    de: {
+      tip: 'Stelle sicher, dass das Bild scharf ist und die Motor- oder Fahrzeugteile gut sichtbar sind.',
+      cancel: 'Abbrechen',
+      send: 'Bild Senden',
+      upload: 'Foto Hochladen',
+      capture: 'Foto Aufnehmen',
+    }
+  };
+
+  const t = translations[language] || translations['es'];
+
+  useEffect(() => {
+    if (initialMessage) {
+      const systemPrompt =
+        'Eres un mecánico experto. Responde de forma técnica pero en lenguaje sencillo. Primero pregunta obligatoriamente: marca, modelo y año del vehículo. Luego solicita detalles de síntomas (sonidos, luces del tablero, kilometraje). Finalmente, da 3 posibles causas y soluciones en formato numerado, con consejos de seguridad. Si el usuario sube una foto, analízala técnicamente antes de responder. Solo responde temas mecánicos o descripciones de autos en venta.';
+
+      const welcomeMsg = {
+        _id: Date.now() + 1,
+        text: initialMessage,
+        createdAt: new Date(),
+        user: { _id: 1, name: 'Usuario' },
+      };
+
+      setMessages([welcomeMsg]);
+      handleSend([welcomeMsg], systemPrompt);
+    }
+  }, [initialMessage]);
+
+  const handleSend = useCallback(async (newMessages, systemPrompt = '') => {
+    setIsLoading(true);
+    setMessages((prev) => GiftedChat.append(prev, newMessages));
+
+    try {
+      const userText = newMessages[0].text;
+      const aiReply = await sendMessageToOpenAI(userText, systemPrompt, language);
+
+      const responseMessage = {
+        _id: Date.now() + 2,
+        text: aiReply,
+        createdAt: new Date(),
+        user: { _id: 2, name: 'Mecánico AI' },
+      };
+
+      setMessages((prev) => GiftedChat.append(prev, [responseMessage]));
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'Hubo un problema al procesar tu mensaje.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [language]);
+
+  const processImage = async (uri) => {
+    setImagePreview(uri);
+    try {
+      setIsLoading(true);
+      const aiResponse = await sendImageToOpenAI(uri, language);
+      const message = {
+        _id: Date.now() + 3,
+        text: aiResponse,
+        createdAt: new Date(),
+        user: { _id: 2, name: 'Mecánico AI' },
+      };
+      setMessages((prev) => GiftedChat.append(prev, [message]));
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Error', 'No se pudo analizar la imagen.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleImageUpload = () => {
+    launchImageLibrary({ mediaType: 'photo', quality: 0.7 }, (response) => {
+      if (response.didCancel || response.errorCode) return;
+      if (response.assets && response.assets.length > 0) {
+        const asset = response.assets[0];
+        setImagePreview(asset.uri);
+      }
+    });
+  };
+
+  const handleCameraCapture = () => {
+    launchCamera({ mediaType: 'photo', quality: 0.7 }, (response) => {
+      if (response.didCancel || response.errorCode) return;
+      if (response.assets && response.assets.length > 0) {
+        const asset = response.assets[0];
+        setImagePreview(asset.uri);
+      }
+    });
+  };
+
+  const removeImage = () => {
+    setImagePreview(null);
+  };
+
+  const sendPreviewImage = () => {
+    if (imagePreview) {
+      processImage(imagePreview);
+      setImagePreview(null);
+    }
+  };
+
+  const renderActions = (props) => (
+    <Actions
+      {...props}
+      options={{
+        [t.upload]: handleImageUpload,
+        [t.capture]: handleCameraCapture,
+        [t.cancel]: () => {},
+      }}
+      icon={() => <Text style={{ color: '#0f0', marginLeft: 10 }}>📷</Text>}
+    />
+  );
+
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+    >
+      <View style={{ flex: 1, backgroundColor: '#000' }}>
+        {isLoading && <ActivityIndicator size="large" color="lime" style={{ marginTop: 10 }} />}
+
+        {imagePreview && (
+          <View style={{ padding: 10 }}>
+            <Image
+              source={{ uri: imagePreview }}
+              style={{ width: '100%', height: 200, resizeMode: 'cover', borderRadius: 10 }}
+            />
+            <Text style={{ color: '#ccc', marginTop: 6, textAlign: 'center', fontSize: 13 }}>
+              {t.tip}
+            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+              <TouchableOpacity onPress={removeImage} style={{ backgroundColor: '#444', padding: 10, borderRadius: 8 }}>
+                <Text style={{ color: 'white' }}>{t.cancel}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={sendPreviewImage} style={{ backgroundColor: '#0f0', padding: 10, borderRadius: 8 }}>
+                <Text style={{ color: '#000' }}>{t.send}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        <GiftedChat
+          messages={messages}
+          onSend={(msgs) => handleSend(msgs)}
+          user={{ _id: 1 }}
+          placeholder="Escribe tu consulta mecánica..."
+          renderInputToolbar={(props) => (
+            <InputToolbar
+              {...props}
+              containerStyle={{ backgroundColor: '#222', borderTopColor: '#333' }}
+              textInputStyle={{ color: '#fff' }}
+            />
+          )}
+          renderActions={renderActions}
+          alwaysShowSend
+          showUserAvatar
+          scrollToBottom
+        />
+      </View>
+    </KeyboardAvoidingView>
+  );
+};
+
+export default ChatScreen;
